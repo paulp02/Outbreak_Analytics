@@ -1,0 +1,213 @@
+---
+title: "First part: Internship 2024"
+author: "Paul PETIT"
+format: pdf
+editor: visual
+---
+
+```{r,}
+#| echo: false
+library(tidyverse)
+library(here) # create paths
+library(performance) # check
+library(latex2exp) # write in LaTeX on plots
+library(grid)
+```
+
+# Serial interval linear regression
+
+Based on the Alene et al. meta-analysis, we compute a linear regression on the
+means of serial intervals as a function of time at the first wave of the
+Covid-19 pandemic.
+Once it is done, we should do the same with M-Pox and also look for other
+articles...
+
+```{r si_covid_table, echo=FALSE}
+covid_serial_interval <- read_csv(
+        here("data", "serial_int-alene_et_al.csv"),
+        col_names = TRUE,
+        col_types = c(rep("c", 2), rep("D", 3), "i", rep("d", 4))
+)
+```
+
+
+```{r si_covid_plot, echo=FALSE}
+lm1 <- lm(Mean~mid_date, covid_serial_interval)
+lm1 |> check_normality()
+lm1 |> check_heteroscedasticity()
+lm1 |> summary()
+```
+
+All the linear regression hypotheses are respected so we can interpret the tests results.
+We can then conclude there is no significant time effect on the estimation of
+the serial interval mean in the studies used by Alene et al. in their
+meta-analysis.
+
+```{r si_covid_plot, echo=FALSE}
+dates <- c(
+        "2020-01-15", "2020-02-01", "2020-02-15", "2020-03-01",
+        "2020-03-15", "2020-04-01", "2020-04-15"
+) |> ymd()
+
+labels <- c(
+        format(dates[1], "%Y-%m-%d"),                           # yyyy-mm-dd
+        sapply(dates[-c(1)], function(date) format(date, "%m-%d")) # mm-dd
+)
+
+ggplot(covid_serial_interval, aes(x=mid_date, y=Mean)) +
+        geom_smooth(
+                linewidth=0.75, method = "lm",
+                color="#ff1493", fill="#ff1493", alpha=0.3
+        ) +
+        geom_point(color="#56B4E9") + # published "#E7A40D" preprint
+        geom_segment(aes(y=CI_min, yend = CI_max), color="#56B4E9") +
+        geom_smooth(
+                linewidth=0.75, method = "lm", se=FALSE,
+                color="#ff1493", fill="#ff1493", alpha=0.3
+        ) +
+        
+        labs(
+                x="", y = "" # Estimated mean serial interval (days)
+        ) +
+        scale_x_date(
+                breaks = dates, # label positions
+                labels = labels,
+                limits = c(dates[1], tail(dates, 1))
+        ) +
+        scale_y_continuous(
+                breaks = c(0, 5, 10), labels = c(0,5,10), limits=c(0,12.75)
+        ) + theme_minimal() +
+        theme(
+                panel.grid.minor.x = element_blank(),
+                axis.text = element_text(size=13)
+      ) +
+        annotation_custom(
+                grob = textGrob(
+                        label = "estimated mean serial interval (days)",
+                        gp = gpar(fontsize = 18, fontface = "bold")
+                ),
+                ymin = 12.9, ymax = 12.9,
+                xmin = ymd("2020-02-13"), xmax = ymd("2020-02-13")
+        ) #+
+        # geom_text(
+        #         aes(
+        #                 label=Study,
+        #                 hjust=-c(
+        #                         0.1, 0.1, 0.1, -1.05, 0.1, 0.1, 0.1,
+        #                         -1.05, 0.1, 0.1, -0.5, 0.1, -0.5, 0.1,
+        #                         -1.05, -1.05, -0.5, -1.05, 0.1, 0.1, -1.05,
+        #                         -1.05, 0.1
+        #                 ),
+        #                 vjust=-c(
+        #                         0.5, -1, 0.5, 0.5, 4, -1.75, 0.5,
+        #                         2, 0.5, 0.5, 2.5, 0.5, 3, 0.5,
+        #                         0.5, -1, -4.5, 0.5, 0.5, -0.5, -1.5,
+        #                         -0.5, -1
+        #                 )
+        #         ),
+        #         size = 3,                    # Adjust the size of the text
+        #         color = "black"              # Set the color of the text
+        # )
+
+# ggsave(here("Final_plots", "Linear_regression_SI.pdf"), width = 8, height = 6)
+```
+
+
+
+# Incubation period linear regression
+
+Based on the Alene et al. meta-analysis again, we compute a linear regression on the
+estimated mean incubation period with time at the first wave of the
+Covid-19 pandemic.
+
+```{r si_covid_table, echo=FALSE}
+covid_incub_period <- read_csv(
+        here("data", "incub_period-alene_et_al.csv"),
+        col_names = TRUE,
+        col_types = c(rep("c", 2), rep("D", 3), "i", rep("d", 4))
+)
+```
+
+
+```{r si_covid_plot, echo=FALSE}
+lm2 <- lm(Mean~mid_date, covid_incub_period)
+lm2 |> check_normality()
+lm2 |> check_heteroscedasticity()
+lm2 |> summary()
+```
+
+All the linear regression hypotheses are respected so we can interpret the tests results.
+
+While no significant association was found between the two variables ($p-value = 0.07 > 0.05$), the positive slope observed aligns with theoretical expectations (Britton and Scalia Tomba, 2019).
+This suggests a possible trend, though further data is needed to confirm the presence or absence of an effect.
+Also, the p-value is close to the threshold, allowing to suspect a lack of statistical power.
+However, it is important to notice the low value or R-squared ($0.22$) which indicate that our linear regression isn't explaining so much our data.
+Finally, M.T. Sofonea found a significant correlation between the time of publication and the estimated mean incubation period.
+While this association differs from the one tested here, it may support the possibility of a real positive relationship between time and the estimated mean incubation period.
+
+```{r si_covid_plot, echo=FALSE}
+dates <- c(
+        "2020-01-01", "2020-01-15", "2020-02-01", "2020-02-15",
+        "2020-03-01", "2020-03-15", "2020-04-01", "2020-04-15"
+) |> ymd()
+
+labels <- c(
+        format(dates[1], "%Y-%m-%d"),                           # yyyy-mm-dd
+        sapply(dates[-c(1)], function(date) format(date, "%m-%d")) # mm-dd
+)
+
+ggplot(covid_incub_period, aes(x=mid_date, y=Mean)) +
+        geom_smooth(
+                linewidth=0.75, method = "lm",
+                color="#ff1493", fill="#ff1493", alpha=0.3
+        ) +
+        geom_point(color="#56B4E9") + # published "#E7A40D" preprint
+        geom_segment(aes(y=CI_min, yend = CI_max), color="#56B4E9") +
+        geom_smooth(
+                linewidth=0.75, method = "lm", se=FALSE,
+                color="#ff1493", fill="#ff1493", alpha=0.3
+        ) +
+        
+        labs(
+                x="", y = "" # Estimated mean serial interval (days)
+        ) +
+        scale_x_date(
+                breaks = dates, # label positions
+                labels = labels,
+                limits = c(ymd("2019-12-31"), tail(dates, 1))
+        ) +
+        scale_y_continuous(
+                breaks = c(0, 5, 10), labels = c(0,5,10), limits=c(0,12.75)
+        ) + theme_minimal() +
+        theme(
+                panel.grid.minor.x = element_blank(),
+                axis.text = element_text(size=13)
+        ) +
+        annotation_custom(
+                grob = textGrob(
+                        label = "estimated mean incubation period (days)",
+                        gp = gpar(fontsize = 18, fontface = "bold")
+                ),
+                ymin = 12.9, ymax = 12.9,
+                xmin = ymd("2020-02-08"), xmax = ymd("2020-02-08")
+        ) #+
+        # geom_text(
+        #         aes(
+        #                 label=Study,
+        #                 hjust=-c(
+        #                         0.1, -1.05, 0.1, -1.05, 0.1, 0.1, 0.1,
+        #                         0.1, 0.1, 0.1, -1.05, 0.1, 0.1, -1.05
+        #                 ),
+        #                 vjust=-c(
+        #                         0.5, -0.5, 0.5, -0.5, 0.5, -1.75, 0.5,
+        #                         0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -1.5
+        #                 )
+        #         ),
+        #         size = 3,                    # Adjust the size of the text
+        #         color = "black"              # Set the color of the text
+        # )
+
+
+
+# ggsave(here("Final_plots", "Linear_regression_IP.pdf"), width = 8, height = 6)
+```
