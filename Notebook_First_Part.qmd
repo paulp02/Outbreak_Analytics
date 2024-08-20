@@ -5,8 +5,11 @@ format: pdf
 editor: visual
 ---
 
-```{r,}
-#| echo: false
+```{r setup, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(
+        echo=FALSE, warning=FALSE, message=FALSE,
+        out.width="70%", fig.asp=.75, fig.align="center"
+)
 library(tidyverse)
 library(here) # create paths
 library(performance) # check
@@ -14,15 +17,13 @@ library(latex2exp) # write in LaTeX on plots
 library(grid)
 ```
 
+       Based on the studies included in the [Alene et al. (2021)](https://doi.org/10.1186/s12879-021-05950-x) and [McAloon et al. (2020)](https://doi.org/10.1136/bmjopen-2020-039652) meta-analyses, we will perform a linear regression on the estimated mean serial intervals and the estimated mean incubation period as a function of time (midpoint of the study period) during the first wave of the COVID-19 pandemic. To study this in more detail, we might, for example, repeat this analysis for M-Pox or look for other articles relevant to COVID-19 that could increase the power of the statistical analyses...
+
 # Serial interval linear regression
 
-Based on the Alene et al. meta-analysis, we compute a linear regression on the
-means of serial intervals as a function of time at the first wave of the
-Covid-19 pandemic.
-Once it is done, we should do the same with M-Pox and also look for other
-articles...
+       For serial intervals, only the [Alene et al. (2021)](https://doi.org/10.1186/s12879-021-05950-x) meta-analysis was used.
 
-```{r si_covid_table, echo=FALSE}
+```{r si_covid_table}
 covid_serial_interval <- read_csv(
         here("data", "serial_int-alene_et_al.csv"),
         col_names = TRUE,
@@ -30,20 +31,17 @@ covid_serial_interval <- read_csv(
 )
 ```
 
-
-```{r si_covid_plot, echo=FALSE}
+```{r si_covid_tests}
 lm1 <- lm(Mean~mid_date, covid_serial_interval)
 lm1 |> check_normality()
 lm1 |> check_heteroscedasticity()
+lm1 |> check_autocorrelation(nsim=10000)
 lm1 |> summary()
 ```
 
-All the linear regression hypotheses are respected so we can interpret the tests results.
-We can then conclude there is no significant time effect on the estimation of
-the serial interval mean in the studies used by Alene et al. in their
-meta-analysis.
+       The linear regression assumptions are met, with the exception of the non-correlation of residuals. The p-value is between $2\%$ and $3\%$, and since no clear pattern is evident in the data, it is acceptable to interpret the test results. Therefore, we can conclude that there is no significant time effect on the estimated mean serial interval in the studies analyzed by [Alene et al. (2021)](https://doi.org/10.1186/s12879-021-05950-x) in their meta-analysis.
 
-```{r si_covid_plot, echo=FALSE}
+```{r si_covid_plot}
 dates <- c(
         "2020-01-15", "2020-02-01", "2020-02-15", "2020-03-01",
         "2020-03-15", "2020-04-01", "2020-04-15"
@@ -79,7 +77,7 @@ ggplot(covid_serial_interval, aes(x=mid_date, y=Mean)) +
         ) + theme_minimal() +
         theme(
                 panel.grid.minor.x = element_blank(),
-                axis.text = element_text(size=13)
+                axis.text = element_text(size=9)
       ) +
         annotation_custom(
                 grob = textGrob(
@@ -87,7 +85,7 @@ ggplot(covid_serial_interval, aes(x=mid_date, y=Mean)) +
                         gp = gpar(fontsize = 18, fontface = "bold")
                 ),
                 ymin = 12.9, ymax = 12.9,
-                xmin = ymd("2020-02-13"), xmax = ymd("2020-02-13")
+                xmin = ymd("2020-02-24"), xmax = ymd("2020-02-24")
         ) #+
         # geom_text(
         #         aes(
@@ -112,15 +110,11 @@ ggplot(covid_serial_interval, aes(x=mid_date, y=Mean)) +
 # ggsave(here("Final_plots", "Linear_regression_SI.pdf"), width = 8, height = 6)
 ```
 
-
-
 # Incubation period linear regression
 
-Based on the Alene et al. meta-analysis again, we compute a linear regression on the
-estimated mean incubation period with time at the first wave of the
-Covid-19 pandemic.
+       For incubation periods, both [Alene et al. (2021)](https://doi.org/10.1186/s12879-021-05950-x) and [McAloon et al. (2020)](https://doi.org/10.1136/bmjopen-2020-039652) meta-analyses were used.
 
-```{r si_covid_table, echo=FALSE}
+```{r ip_covid_table}
 covid_incub_period <- read_csv(
         here("data", "incub_period-alene_et_al.csv"),
         col_names = TRUE,
@@ -128,24 +122,17 @@ covid_incub_period <- read_csv(
 )
 ```
 
-
-```{r si_covid_plot, echo=FALSE}
+```{r ip_covid_tests}
 lm2 <- lm(Mean~mid_date, covid_incub_period)
 lm2 |> check_normality()
 lm2 |> check_heteroscedasticity()
+lm2 |> check_autocorrelation()
 lm2 |> summary()
 ```
 
-All the linear regression hypotheses are respected so we can interpret the tests results.
+       All the linear regression hypotheses are met, so we can interpret the tests results. While no significant association was found between the two variables ($p-value = 0.069$) if we keep a $5\%$ threshold, the positive slope observed aligns with theoretical expectations ([Britton & Scalia Tomba, 2019](https://doi.org/10.1098/rsif.2018.0670)). This suggests a possible trend, though further data is needed to confirm the presence or absence of an effect. Also, the p-value is close to $5\%$ and could be linked to a lack of statistical power. However, it is important to notice the low value or R-squared ($0.22$) which indicate that our linear regression isn't explaining so much our data.
 
-While no significant association was found between the two variables ($p-value = 0.07 > 0.05$), the positive slope observed aligns with theoretical expectations (Britton and Scalia Tomba, 2019).
-This suggests a possible trend, though further data is needed to confirm the presence or absence of an effect.
-Also, the p-value is close to the threshold, allowing to suspect a lack of statistical power.
-However, it is important to notice the low value or R-squared ($0.22$) which indicate that our linear regression isn't explaining so much our data.
-Finally, M.T. Sofonea found a significant correlation between the time of publication and the estimated mean incubation period.
-While this association differs from the one tested here, it may support the possibility of a real positive relationship between time and the estimated mean incubation period.
-
-```{r si_covid_plot, echo=FALSE}
+```{r ip_covid_plot}
 dates <- c(
         "2020-01-01", "2020-01-15", "2020-02-01", "2020-02-15",
         "2020-03-01", "2020-03-15", "2020-04-01", "2020-04-15"
@@ -181,7 +168,7 @@ ggplot(covid_incub_period, aes(x=mid_date, y=Mean)) +
         ) + theme_minimal() +
         theme(
                 panel.grid.minor.x = element_blank(),
-                axis.text = element_text(size=13)
+                axis.text = element_text(size=9)
         ) +
         annotation_custom(
                 grob = textGrob(
@@ -189,7 +176,7 @@ ggplot(covid_incub_period, aes(x=mid_date, y=Mean)) +
                         gp = gpar(fontsize = 18, fontface = "bold")
                 ),
                 ymin = 12.9, ymax = 12.9,
-                xmin = ymd("2020-02-08"), xmax = ymd("2020-02-08")
+                xmin = ymd("2020-02-21"), xmax = ymd("2020-02-21")
         ) #+
         # geom_text(
         #         aes(
@@ -211,3 +198,13 @@ ggplot(covid_incub_period, aes(x=mid_date, y=Mean)) +
 
 # ggsave(here("Final_plots", "Linear_regression_IP.pdf"), width = 8, height = 6)
 ```
+
+# Conclusion
+
+       At the onset of the COVID-19 pandemic, the situation was particularly challenging as we faced a new pathogen with unknown characteristics and that urgent daily decisions had to be made, often with limited data to guide them.
+
+       To better prepare for future pandemics, it is essential to understand uncertainties, address biases, and consider factors that might skew estimates of key control parameters, such as the instantaneous reproduction number. This understanding is critical for accurately assessing the impact of public health measures and interventions.
+
+       In this context, the theoretical insights provided by [Britton & Scalia Tomba (2019)](https://doi.org/10.1098/rsif.2018.0670) are valuable, but they must be tested in real-world scenarios to verify their influence. While we do observe, as they predicted, an increase in XXX in the estimated mean incubation period—potentially explained by the factors they highlight (to be specified) — the anticipated relationship with the estimated mean serial interval does not hold. It is likely that adjusting the serial interval estimate accordingly would not enhance the accuracy of $\mathcal{R}_0$ or $\mathcal{R}_t$ estimations.
+
+       These findings, of course, need to be validated across different pathogens, such as M-Pox, Ebola, or influenza, where epidemiological data are available. Furthermore, a more comprehensive literature review could identify studies that [Alene et al. (2021)](https://doi.org/10.1186/s12879-021-05950-x) and [McAloon et al. (2020)](https://doi.org/10.1136/bmjopen-2020-039652) may have excluded for reasons not relevant to our analysis. Finally, the same type of study could be extended to other epidemiological parameters to have a clearer view of factors to be taken into account during an emergency situation as the early stage of an outbreak situation.
