@@ -1,0 +1,847 @@
+---
+title: "..."
+author: "Paul Petit"
+format: pdf
+editor: visual
+---
+
+```{r setup, warning=FALSE, message=FALSE, include=FALSE, message=FALSE}
+library(deSolve)
+library(tidyverse)
+library(viridis)
+library(rootSolve)
+library(ggnewscale)
+library(here)
+library(lamW)
+```
+
+## SIR model analysis
+
+First, we need to define a function that allows us to compute our dynamical system with the following equations:
+
+$$
+\begin{equation}
+\begin{cases}
+\begin{aligned}
+    1 &\geq s_0 + i_0 \\ \\
+    \frac{\mathrm{d}s}{\mathrm{d}\tau} &:= - \mathcal{R}_0  s, & \quad & s(0) := s_0 \\
+    \frac{\mathrm{d}i}{\mathrm{d}\tau} &:= \mathcal{R}_0  s - i, & \quad & i(0) := i_0 \\
+\end{aligned}
+\end{cases}
+\end{equation}
+$$
+
+```{r sir_model}
+# Dimensionless SIR model function
+sir_model <- function(time, state, parameters) {
+        with(as.list(c(state, parameters)), {
+                ds <- - R0 * s * i
+                di <- R0 * s * i - i
+                list(c(ds, di))
+        })
+}
+```
+
+### Global vector field
+
+First, we want to create the vector field for two different values of $\mathcal{R}_0$ with $s$ and $i$ ranging between 0 and 1.
+
+```{r vector_field}
+R_0 <- c(0.75, 3) # the 2 values
+vector_fields <- vector("list", 2) # list that will contain two data.frames
+names(vector_fields) <- R_0
+
+for (R0 in R_0){
+        # Define points of the grid
+        vector_field <- expand.grid(
+                s = seq(0, 1, length = 15), i = seq(0, 1, length = 15)
+        )
+        # Compute the two vector components
+        vector_field$ds <- - R0 * vector_field$s * vector_field$i
+        vector_field$di <- R0 * vector_field$s * vector_field$i - vector_field$i
+        # Compute the vector length
+        vector_field$norm <- sqrt(vector_field$ds^2 + vector_field$di^2)
+        # Reduce vectors to a length of 1
+        vector_field$ds_norm <- vector_field$ds / vector_field$norm
+        vector_field$di_norm <- vector_field$di / vector_field$norm
+        # Delete vectors in the part of the diagramme not interesting us
+        vector_field <- vector_field |> dplyr::filter(i+s < 1)
+        vector_fields[[as.character(R0)]] <- vector_field
+}
+
+# Add a `R_0` column and combine the two dataframes
+vector_fields_df <- bind_rows(vector_fields, .id = c("R_0"))
+vector_fields_df$R_0_f <- vector_fields_df$R_0 |> factor()
+levels(vector_fields_df$R_0_f) <- as.character(R_0) |> sapply(function(n){
+        parse(text=latex2exp::TeX(paste0("$R_0 = ", n, "$")))
+})
+# Remove useless variables
+rm(vector_field)
+```
+
+And we also define two eigenvectors to illustrate their direction when $s>1/\mathcal{R}_0$ and $s<1/\mathcal{R}_0$.
+
+```{r eigen_vectors}
+eigen_vectors <- vector("list", 2)
+names(eigen_vectors) <- R_0
+for (R0 in R_0){
+        eigen_vector <- tibble(s = c(0.2,0.65), i = 0)
+        # Compute the two vector components
+        eigen_vector$ds <- -1
+        eigen_vector$di <- 1 - c(1 / (R0 * eigen_vector$s))
+        # Compute the vector length
+        eigen_vector$norm <- sqrt(eigen_vector$ds^2 + eigen_vector$di^2)
+        # Reduce vectors to a length of 1
+        eigen_vector$ds_norm <- eigen_vector$ds / eigen_vector$norm
+        eigen_vector$di_norm <- eigen_vector$di / eigen_vector$norm
+        eigen_vector$i <- ifelse(eigen_vector$di<0,-eigen_vector$di_norm*0.05,0)
+        # Add the eigen value as the norm
+        eigen_vector$norm <- abs(R0 * eigen_vector$s - 1)
+        eigen_vectors[[as.character(R0)]] <- eigen_vector
+}
+# Add a `R_0` column and combine the two dataframes
+eigen_vectors_df <- bind_rows(eigen_vectors, .id = c("R_0"))
+eigen_vectors_df$R_0_f <- eigen_vectors_df$R_0 |> factor()
+levels(eigen_vectors_df$R_0_f) <- as.character(R_0) |> sapply(function(n){
+        parse(text=latex2exp::TeX(paste0("$R_0 = ", n, "$")))
+})
+# Remove useless variables
+rm(eigen_vector, R0)
+```
+
+Finally, we plot Figure 1a, representing the vector field of the $SIR$ model for two values of $\mathcal{R}_0$. We also add two eigenvectors to illustrate the trajectory directions when $s>1/\mathcal{R}_0$ and $s<1/\mathcal{R}_0$.
+
+```{r figure_1a}
+ggplot(data = vector_fields_df, aes(x = s, y = i)) +
+        # Add a vertical line only for the panel where R_0 == 3
+        geom_vline(
+                data = subset(vector_fields_df, R_0 == 3),
+                aes(xintercept = 1 / 3), linetype = 2,
+                linewidth = 0.75, color = "grey"
+        ) +
+        # Delimit interesting initial values
+        geom_function(
+                fun = function(x) 1 - x, linewidth = 0.75
+        ) +
+        # Draw vectors colored based on their length
+        geom_segment(aes(
+                xend = s + ds_norm * 0.03,
+                yend = i + di_norm * 0.03, color = norm
+        ), arrow = arrow(length = unit(0.1, "cm"), type="closed")) +
+        # Use the 'viridis' color palette for vector magnitudes
+        scale_color_viridis_c(option = "D", name = "Vector norm") +
+        # Add a new colour scale for eigenvectors
+        new_scale_color() +
+        # Plot specific points for the R_0 = 0.75 scenario
+        geom_point(
+                data = data.frame(
+                        s=seq(0,1,by=0.125), i=rep(0,9),
+                        R_0_f="R[0] * {\n    phantom() == phantom()\n} * 0.75"
+                ),
+                color="red3"
+        ) +
+        # Plot specific points for the R_0 = 3 scenario
+        geom_point(
+                data = data.frame(
+                        s=seq(0,1/3,length=4), i=rep(0,4),
+                        R_0_f="R[0] * {\n    phantom() == phantom()\n} * 3"
+                ),
+                color="red3"
+        ) +
+        geom_point(
+                data = data.frame(
+                        s=seq(1/3,1,length=5), i=rep(0,5),
+                        R_0_f="R[0] * {\n    phantom() == phantom()\n} * 3"
+                ),
+                color="red3", shape=1
+        ) +
+        # Draw coloured vectors as a function of their length
+        geom_segment(
+                data = eigen_vectors_df, aes(
+                        xend = s + ds_norm * 0.05,
+                        yend = i + di_norm * 0.05, color = "red3"
+                ), size=0.75,
+                arrow = arrow(length = unit(0.1, "cm"), type="closed")
+        ) +
+        scale_color_discrete(name = "Eigenvectors", labels=NULL) +
+        labs(
+                x = "Proportion of susceptibles (s)",
+                y = "Proportion of infected (i)"
+        ) +
+        facet_wrap(vars(R_0_f), labeller = label_parsed) + theme_bw() +
+        scale_x_continuous(
+                limits = c(-0.01, 1.01), expand = c(0, 0),
+                labels = c("0", "0.25", "0.50", "0.75", "1")
+        ) +
+        scale_y_continuous(
+                limits = c(-0.01, 1.01), expand = c(0, 0),
+                labels = c("0", "0.25", "0.50", "0.75", "1")
+        ) +
+        theme(
+                plot.title = element_text(hjust = 0.5),
+                panel.spacing = unit(.75, "cm"),
+                axis.text.y = element_text(size=14),
+                axis.text.x = element_text(size=14),
+                axis.title.y = element_text(size=18),
+                axis.title.x = element_text(size=18),
+                strip.text = element_text(size=14),
+                legend.text = element_text(size=14),
+                legend.title = element_text(size=18)
+        ) # center title
+
+# Uncomment to save the plot to a PDF file
+# ggsave(here("results","figure_1a_vector_field.pdf"), width=8, height = 6)
+```
+
+### Lyapunov function
+
+We plot the Lyapunov function associated with the fixed point $s=1/\mathcal{R}_0$ and $i=0$:
+
+$$
+V(s, i) = s + i - \frac{1 + ln\left(\mathcal{R}_0 s\right)}{\mathcal{R}_0}
+$$
+
+```{r lyapunov}
+# Lyapunov function V
+lyapunov_func <- function(s, i, R0){
+        return(s + i - (1 + log(R0*s)) / R0)
+}
+```
+
+We will plot the level curves of this function on the phase diagram of the model. Since the time derivative of this function is zero, the level curves will correspond to the system's trajectories.
+
+```{r grid}
+R_0 <- 3
+# Create a grid of s and i values
+s_vals <- seq(0, 1, by = 0.0001)
+i_vals <- seq(0, 1, by = 0.01)
+grid <- expand.grid(s = s_vals, i = i_vals) |> dplyr::filter(s + i <= 1)
+
+# Compute V on each (s, i) tuple
+grid$lyapunov <- mapply(
+        function(s, i) lyapunov_func(s,i,R_0), grid$s, grid$i
+)
+grid$R_0_f <- factor(R_0)
+levels(grid$R_0_f) <- as.character(R_0) |> sapply(function(n){
+        parse(text=latex2exp::TeX(paste0("$R_0 = ", n, "$")))
+})
+```
+
+Now that the values have been calculated, here is the plot:
+
+```{r figure_1b}
+# Step 1: Create base plot with contour lines
+plot_object <- ggplot(data = grid, aes(x = s, y = i)) +
+        geom_vline(
+                xintercept = 1 / R_0, linetype = 2,
+                linewidth = 0.75, color = "grey"
+        ) +
+        geom_function(fun = function(x) 1 - x, linewidth = 0.75) +
+        geom_contour(
+                aes(z = lyapunov), color = "blue3",
+                linewidth = 0.5, bins = 30
+        ) +
+        labs(
+                x = "Proportion of susceptibles (s)",
+                y = "Proportion of infected (i)"
+        ) +
+        facet_wrap(vars(R_0_f), labeller = label_parsed) + theme_bw() +
+        scale_x_continuous(
+                limits = c(-0.01, 1.01), expand = c(0, 0),
+                labels = c("0", "0.25", "0.50", "0.75", "1")
+        ) +
+        scale_y_continuous(
+                limits = c(-0.01, 1.01), expand = c(0, 0),
+                labels = c("0", "0.25", "0.50", "0.75", "1")
+        ) +
+        theme(
+                plot.title = element_text(hjust = 0.5),
+                panel.spacing = unit(.75, "cm")
+        )
+
+# Step 2: Extract contour data using ggplot_build
+plot_data <- ggplot_build(plot_object)$data[[3]] # Data from contour layer
+
+# Step 3: Filter contour data to locate intersection points on x-axis
+intersection_points <- plot_data[plot_data$y == 0, ]
+
+# Step 4: Add intersection points to plot
+plot_object +
+        geom_point(
+                data = intersection_points,
+                aes(x = x, y = y, shape = (x <= 1/R_0)),
+                color = "red", size = 2
+        ) +
+        scale_shape_manual(
+                # Solid dots for s < 1/R_0, open circles for s > 1/R_0
+                values = c(`TRUE` = 16, `FALSE` = 1)
+        ) +
+        theme(
+                legend.position = "none",
+                axis.text.y = element_text(size=14),
+                axis.text.x = element_text(size=14),
+                axis.title.y = element_text(size=18),
+                axis.title.x = element_text(size=18),
+                strip.text = element_text(size=14)
+        )  # Removes the legend
+
+# Uncomment to save the plot to a PDF file
+# ggsave(here("results","figure_1b_lyapunov_func.pdf"), width=8, height = 6)
+```
+
+## Analysis with the intervention
+
+In this section, we analyze the effect of an intervention on the SIR model. The intervention is defined within the function by modifying the parameter prop based on whether the time t falls within the intervention period. Specifically, prop is reduced by a factor K during this period.
+
+The parameters for this analysis are as follows: - $\mathcal{R}_0=3$; - $\tau_{\mathrm{m}}$ (intervention start time) \$ = 5.75\$; - $\delta_{\mathrm{m}}$ (intervention duration) \$ = 10\$; - $\kappa$ (intervention strength) $= 1$; - $N$ (population size) $= 1\, 000\, 000$; - The time frame spans 30 characteristic times.
+
+### Define the SIR Model with Intervention
+
+```{r sir_intervention}
+sir_intervention <- function(t, state, param) {
+        with(as.list(c(state, param)), {
+                # Intervention integrated in the function
+                if ((t < tau_m) | (t > (tau_m + delta_m))) {
+                        prop <- 1
+                } else {
+                        prop <- 1 - K
+                }
+                lambda <- R0 * i * prop
+                ds = -lambda * s
+                di = lambda * s - i
+                return(list(c(ds, di)))
+        })
+}
+```
+
+### Plotting an intervention model trajectory
+
+#### Simulation Parameters and Initial Conditions
+
+```{r init}
+R_0 <- 3
+tau_m <- 5.75
+delta_m <- 10
+K <- 1
+N <- 1e6 # Population size
+tc_number <- 30 # Number of characteristic time we run on
+params <- c(R0=R_0, tau_m=tau_m, delta_m=delta_m, K=K)
+init <- c(s = (N-1)/N, i = 1/N)
+times <- seq(0, tc_number, by = 0.1) # time sequence
+```
+
+#### Run the SIR Model with Intervention and Calculate Peak Infection
+
+```{r out_traj}
+out_traj <- lsoda(
+        y = init, times = times, func = sir_intervention,
+        parms = params
+) |> as_tibble()
+i_max <- max(out_traj$i) # Maximum infection level reached
+```
+
+#### Plotting the Results
+
+In this plot, we include the intervention's effect on the trajectory and the level of peak infection:
+
+```{r figure_2a}
+plot_object +
+        geom_hline(
+                yintercept = lyapunov_func(1, 0, R_0),
+                color="grey", linetype=2, linewidth = 0.75
+        ) +
+        geom_point(
+                data = intersection_points,
+                aes(x = x, y = y, shape = (x <= 1/R_0)),
+                color = "red", size = 2
+        ) +
+        scale_shape_manual(
+                # Solid dots for s < 1/R_0, open circles for s > 1/R_0
+                values = c(`TRUE` = 16, `FALSE` = 1)
+        ) +
+        theme(
+                legend.position = "none",
+                axis.text.y = element_text(size=14),
+                axis.text.x = element_text(size=14),
+                axis.title.y = element_text(size=18),
+                axis.title.x = element_text(size=18),
+                strip.text = element_text(size=14)
+        ) + # Remove the legend
+        geom_function(
+                fun=function(s) 1-s+(log(s)/R_0), color="blue3",
+                linewidth=0.75, linetype = 2
+        ) +
+        geom_path(data = out_traj, color = "green3", size = 0.75) +
+        geom_hline(yintercept = i_max, linetype=2, linewidth = 0.75)
+
+# Uncomment to save the plot to a PDF file
+# ggsave(here("results","figure_2a_random_trajectory.pdf"), width=8, height = 6)
+```
+
+#### Calculating the Post-Intervention Peak and Optimal Proportion of Susceptible Individuals
+
+-   `peak_post_inter`: Calculates the Lyapunov function value at the peak of the infection after the intervention;
+-   `optimal_s`: Provides the optimal value of $s(\tau_{\mathrm{m}})$, the proportion of susceptible individuals at the intervention time, to achieve a desired outcome.
+
+```{r peaks}
+# Function defining the peak after intervention
+peak_post_inter <- function(s, R0){
+        return(s - (1 + log(R0*s)) / R0)
+}
+
+# Function for optimal s(tau_m)
+optimal_s <- function(R0){
+        i_optimal <- (1 - (1 + log(R0))/R0)/2
+        numerator <- lambertWm1(-R0/(exp(R0*(1-i_optimal))))
+        return(-numerator/R0)
+}
+```
+
+### Plotting the best
+
+In this final part, we plot the optimal trajectory of the epidemiological model under the assumption of a prolonged public health intervention. On this graphic, we see that the optimal trajectory corresponds to the one when we start the intervention at the intersection between the null trajectory and a given function defined in the report (in red on the plot).
+
+```{r figure_2b}
+ggplot(data = grid, aes(x = s, y = i)) +
+        # Vertical line at 1/R_0 to show threshold for controlling the epidemic
+        geom_vline(
+                xintercept = 1 / R_0, linetype = 2,
+                linewidth = 0.75, color = "grey"
+        ) +
+        # Delimit the initial values we are interested in
+        geom_function(
+                fun = function(x) 1 - x, linewidth = 0.75
+        ) +
+        # Set axis labels for susceptible (s) and infected (i) proportions
+        labs(
+                x = "Proportion of susceptibles (s)",
+                y = "Proportion of infected (i)"
+        ) +
+        # Use facet to write R0 value on the top of the plot
+        facet_wrap(vars(R_0_f), labeller = label_parsed) + theme_bw() +
+        scale_x_continuous(
+                limits = c(-0.01, 1.01), expand = c(0, 0),
+                labels = c("0", "0.25", "0.50", "0.75", "1")
+        ) +
+        scale_y_continuous(
+                limits = c(-0.01, 1.01), expand = c(0, 0),
+                labels = c("0", "0.25", "0.50", "0.75", "1")
+        ) +
+        # Center plot title and add spacing between panels
+        theme(
+                plot.title = element_text(hjust = 0.5),
+                panel.spacing = unit(.75, "cm")
+        ) +
+        # Horizontal line giving the peak height without intervention
+        geom_hline(
+                yintercept = lyapunov_func(1, 0, R_0),
+                color="grey", linetype=2, linewidth = 0.75
+        ) +
+        scale_shape_manual(
+                # Solid dots for s < 1/R_0, open circles for s > 1/R_0
+                values = c(`TRUE` = 16, `FALSE` = 1)
+        ) +
+        theme(legend.position = "none") +  # Remove legend
+        # Post-intervention peak height as a function of starting time
+        geom_function(
+                fun=function(s) peak_post_inter(s, R_0), color="red3",
+                linewidth=0.75
+        ) +
+        # Trajectory without intervention
+        geom_function(
+                fun=function(s) 1-s+(log(s)/R_0), color="blue3",
+                linewidth=0.75, linetype=2
+        ) +
+        # Optimal trajectory with long intervention before intervention
+        geom_function(
+                fun=function(s){
+                        ifelse(s >= optimal_s(R_0), 1-s+(log(s)/R_0), NA)
+                },
+                color="green3", linewidth=0.75
+        ) +
+        geom_segment(
+                aes(
+                        x = optimal_s(R_0),
+                        y = 1-optimal_s(R_0)+(log(optimal_s(R_0))/R_0),
+                        xend = optimal_s(R_0), yend = 0
+                ), 
+               color = "green3", size = 0.75
+        ) +
+        # Optimal trajectory with long intervention after intervention
+        geom_function(
+                fun=function(s){
+                        ifelse(
+                                s <= optimal_s(R_0),
+                                optimal_s(R_0) -s +(log(s/optimal_s(R_0))/R_0),
+                                NA
+                        )
+                }, color="green3",
+                linewidth=0.75
+        ) +
+        # Lowest (optimal) peak with strict and long intervention
+        geom_hline(
+                yintercept = lyapunov_func(1, 0, R_0)/2,
+                linetype=2, linewidth = 0.75
+        ) +
+        theme(
+                axis.text.y = element_text(size=14),
+                axis.text.x = element_text(size=14),
+                axis.title.y = element_text(size=18),
+                axis.title.x = element_text(size=18),
+                strip.text = element_text(size=14)
+        )
+
+# Uncomment to save the plot to a PDF file
+# ggsave(here("results","figure_2b_optim_strict_intervention.pdf"), width=8, height = 6)
+```
+
+## Numerical exploration of intervention strategies
+
+After examining a strict ($\kappa = 1$) and prolonged intervention ($\delta_{\mathrm{m}} \gg 1$), which optimally reduces the peak by half, we now extend our exploration to a range of $\kappa$ and $\delta_{\mathrm{m}}$ values.
+
+To achieve this, we first define a function that computes the peak prevalence efficiently, leveraging relationships between $s$, $i$, and $\mathcal{R}0$ to avoid running the simulation of the dynamical system after $\tau = \tau{\mathrm{m}} + \delta_{\mathrm{m}}$.
+
+```{r peak_intervention}
+# Function to return the peak value of an epidemic with an intervention
+intervention_to_optim <- function(tau_m, R0, delta_m, K, N=1e6, dt=0.01){
+        # Compute the dynamical system up to the end of the intervention
+        parms <- c(R0=R0, tau_m=tau_m, delta_m=delta_m, K=K)
+        init <- c(s = (N-1)/N, i = 1/N)
+        times <- seq(0, tau_m+delta_m, by = dt) # time sequence
+        out <- lsoda(
+                y = init, times = times, func = sir_intervention,
+                parms = parms
+        ) |> as.data.frame()
+        # Peak value before and during intervention
+        peak_ante_int <- max(out$i)
+        # Final s and i values at the end of the intervention
+        s_end <- out$s |> tail(1)
+        i_end <- out$i |> tail(1)
+        # Compute the post-intervention peak if threshold 1/R0 is not crossed
+        peak_post_int <- ifelse(
+                s_end<=1/R0, 0,
+                lyapunov_func(s_end, i_end, R0)
+        )
+        # Return the global peak value of the epidemic
+        return(max(c(peak_post_int, peak_ante_int)))
+}
+```
+
+We also set up a function to calculate the time of the epidemic peak.
+
+```{r time_of_peak_without_intervention}
+catch_taupeak0 <- function(R0, ct, N=1e6, dt=0.01){
+        parms <- c(R0=R0)
+        init <- c(s = (N-1)/N, i = 1/N)
+        times <- seq(0, ct, by = dt) # time sequence
+        out <- lsoda(
+                y = init, times = times, func = sir_model,
+                parms = parms
+        ) |> as.data.frame()
+        index <- which.max(out$i)
+        tau_peak <- out$time[index]
+        return(tau_peak)
+}
+```
+
+We then compute optimal interventions across different values of $\kappa$ and $\delta_{\mathrm{m}}$.
+
+```{r optimize_multiple_interventions}
+R0_vect <- c(4, 6)
+delta_m_rel_vect <- seq(0.2, 1, by=0.2)
+K_vect <- seq(0.005, 1, by=0.005)
+list_df <- list()
+
+i <- 0
+
+for (R0 in R0_vect){
+        tau_peak_without <- catch_taupeak0(R0, 6)
+        i_peak_without <- lyapunov_func(1,0,R0)
+        R0_c <- as.character(R0)
+        for (delta_m_rel in delta_m_rel_vect){
+                delta_m <- delta_m_rel * tau_peak_without
+                delta_m_c <- as.character(delta_m_rel)
+                tau_init <- tau_peak_without/2
+                for (K in K_vect){
+                        K_c <- as.character(K)
+                        to_optim <- partial(
+                                intervention_to_optim, R0=R0,
+                                delta_m=delta_m, K=K
+                        )
+                        optim_tau_ipeak <- optimize(
+                                f = to_optim,
+                                interval = c(0, tau_peak_without)
+                        )
+                        
+                        optim_tau <- optim_tau_ipeak$minimum
+                        optim_ipeak <- optim_tau_ipeak$objective
+                        
+                        Phi <- (optim_ipeak - i_peak_without)/i_peak_without
+                        val <- c(Phi, optim_tau/tau_peak_without)
+                        list_df[[R0_c]][[delta_m_c]][[K_c]] <- val
+                        
+                        i <- i + 1
+                        print(paste0(i/20, "%"))
+                }
+        }
+}
+```
+
+We then transform the list into a data frame.
+
+```{r dataframe_optimize}
+df <- data.frame(
+        R0=c(), delta_m=c(), K=c(),
+        Phi=c(), optim_tau=c()
+)
+for(R0 in 1:length(R0_vect)){
+        R0_n <- R0_vect[[R0]]
+        for (delta_m in 1:length(delta_m_rel_vect)){
+                delta_m_n <- delta_m_rel_vect[delta_m]
+                for (K in 1:length(K_vect)){
+                        K_n <- K_vect[K]
+                        
+                        df <- df |> rbind(data.frame(
+                                R0=R0_n, delta_m=delta_m_n, K=0,
+                                Phi=0, optim_tau=NA
+                        ))
+                        
+                        Phi <- list_df[[R0]][[delta_m]][[K]][1]
+                        optim_tau <- list_df[[R0]][[delta_m]][[K]][2]
+                                
+                        df  <- df |> rbind(data.frame(
+                                R0=R0_n, K=K_n, delta_m=delta_m_n,
+                                Phi=Phi, optim_tau=optim_tau
+                        ))
+                }
+        }
+}
+
+df <- df |> mutate(
+        R0_v = factor(R0), delta_m_v = factor(delta_m),
+        K_v = factor(K)
+)
+
+levels(df$R0_v) <- sapply(
+        R0_vect,
+        function(r){
+                parse(text=latex2exp::TeX(paste0("$R_0 = ", r, "$")))
+        }
+        )
+
+levels(df$delta_m_v) <- sapply(
+        delta_m_rel_vect,
+        function(d){
+                parse(text=latex2exp::TeX(paste0("$delta_{m} = ", d, "$")))
+        }
+        )
+```
+
+On the plot below, we observe that as intervention effectiveness increases, the intervention must start later.
+
+```{r figure_3a}
+ggplot(df, aes(x=K, y=optim_tau, color=delta_m, group=delta_m)) +
+        geom_line() + theme_classic() + scale_color_viridis() +
+        facet_wrap(vars(R0_v), labeller = label_parsed) +
+        labs(
+                x = latex2exp::TeX("$kappa$"),
+                y = latex2exp::TeX("$tau_m/tau_p^{\\circ}$"),
+                color = latex2exp::TeX("$delta_m/tau_p^{\\circ}$")
+        ) +
+        theme(
+                axis.text = element_text(face="bold", size=10),
+                axis.title = element_text(face="bold", size=15),
+                legend.title = element_text(size=14),
+                legend.text = element_text(face="bold", size=10),
+                strip.text = element_text(face="bold", size=15)
+        )
+
+# Uncomment to save the plot to a PDF file
+# ggsave(here("results","figure_3a_tau_optim.pdf"), width=8, height = 6)
+```
+
+Finally, we plot the fraction of the peak removed by intervention as a function of intervention effectiveness $\kappa$, demonstrating that an optimal $\kappa < 1$ exists above a certain $\delta_{\mathrm{m}}$ value.
+
+```{r figure_3b}
+ggplot(df, aes(x=K, y=-Phi, color=delta_m, group=delta_m)) +
+        geom_line() + theme_classic() + scale_color_viridis() +
+        facet_wrap(vars(R0_v), labeller = label_parsed) +
+        labs(
+                x = latex2exp::TeX("$kappa$"),
+                y = latex2exp::TeX("$Phi$"),
+                color = latex2exp::TeX("$delta_m/tau_{(p,0)}$")
+        ) +
+        theme(
+                axis.text = element_text(face="bold", size=10),
+                axis.title = element_text(face="bold", size=15),
+                legend.title = element_text(size=14),
+                legend.text = element_text(face="bold", size=10),
+                strip.text = element_text(face="bold", size=15)
+        )
+
+# Uncomment to save the plot to a PDF file
+# ggsave(here("results","figure_3b_optim_interventions.pdf"), width=8, height = 6)
+```
+
+There are convergence issues in optimization, but these preliminary results provide valuable insights. Improvements in the optimization process are still needed.
+
+# Bonus
+
+We now calculate the peak reduction limit for different $\kappa$ values as $\delta_{\mathrm{m}}$ approaches infinity. To do this, let’s first recall some properties that we will code and use to obtain the desired results.
+
+First, there is a relation between $i$ and $s$ along the same trajectory, defined as follows:
+
+$$
+i(\tau) = s_0 - s(\tau) + i_0 + \frac{\mathrm{log}\left(\frac{s(\tau)}{s_0}\right)}{\mathcal{R}_0}
+$$
+
+```{r relation_s&i}
+i_func_s <- function(s, R0, s0=1, i0=0){
+        return(s0-s+i0+(log(s/s0)/R0))
+}
+```
+
+Additionally, we can determine the final value of $s$ at the end of the epidemic using some information:
+
+$$
+s_{\infty} = -\frac{\mathrm{W}_0\left(-\frac{s_0\, \mathcal{R}_0}{e^{(s_0 + i_0)\, \mathcal{R}_0}}\right)}{\mathcal{R}_0}
+$$
+
+```{r final_susceptibles}
+s_end_traj <- function(s0, i0, R0){
+        return(- lambertW0(-s0 * R0 / exp((s0+i0) * R0)) / R0)
+}
+```
+
+With these, we can now proceed with our calculation.
+
+```{r limit_delta_optim}
+# s_start between 1/R0 and 1 (R0 is supposed > 1 to have an outbreak)
+limit_intervention_to_optim <- function(s_start, R0, K){
+        # First, we calculate the initial prevalence when the intervention starts, knowing the proportion of susceptibles remaining and the epidemic’s R0.
+        i_start <- i_func_s(s_start, R0)
+        
+        # To find the highest prevalence value before any potential rebound (due to the intervention’s end), we consider the prevalence at the start of the intervention if it causes an immediate decrease, or the epidemic peak with R0 reduced by the factor (1-K).
+        peak_ante_or_during_int <- ifelse(
+                s_start<=1/(R0*(1-K)), i_start,
+                lyapunov_func(s_start, i_start, R0*(1-K))
+        )
+        
+         # We then determine the final value of s at the end of the intervention.
+        s_end_int <- ifelse(
+                R0*(1-K) == 0, s_start,
+                s_end_traj(s_start, i_start, R0*(1-K))
+        )
+        
+        # Using this value, we finally compute the post-intervention peak if we haven’t crossed the threshold s=1/R0.
+        peak_post_int <- ifelse(
+                s_end_int<=1/R0, 0,
+                lyapunov_func(s_end_int, 0, R0)
+        )
+        return(max(c(peak_post_int, peak_ante_or_during_int)))
+}
+
+# Testing for K=1
+limit_intervention_to_optim(0.75, 3, 1)
+limit_intervention_to_optim(0.7575, 3, 1)
+limit_intervention_to_optim(0.76, 3, 1)
+lyapunov_func(1,0,3)/2
+```
+
+We now use this function to optimize the start time of interventions for each $\kappa$.
+
+```{r computation_limits}
+R0_vect <- c(4, 6)
+K_vect <- seq(0.001, 1, by=0.001)
+list_df_limit <- list()
+
+i <- 0
+
+for (R0 in R0_vect){
+        i_peak_without <- lyapunov_func(1,0,R0)
+        R0_c <- as.character(R0)
+        for (K in K_vect){
+                K_c <- as.character(K)
+                to_optim <- partial(limit_intervention_to_optim, R0=R0, K=K)
+                optim_tau_ipeak <- optimize(
+                        f = to_optim,
+                        interval = c(1/R0, 1)
+                )
+                optim_s_start <- optim_tau_ipeak$minimum
+                optim_ipeak <- optim_tau_ipeak$objective
+                Phi <- (optim_ipeak - i_peak_without)/i_peak_without
+                val <- c(Phi, optim_s_start)
+                list_df_limit[[R0_c]][[K_c]] <- val
+                
+                i <- i + 1
+                print(paste0(i/20, "%"))
+        }
+}
+```
+
+We convert this list to a data frame.
+
+```{r limit_dataframe}
+df_limit <- data.frame(
+        R0=c(), K=c(),
+        Phi=c(), optim_s_start=c()
+)
+for(R0 in 1:length(R0_vect)){
+        R0_n <- R0_vect[[R0]]
+        for (K in 1:length(K_vect)){
+                K_n <- K_vect[K]
+                
+                df_limit <- df_limit |> rbind(data.frame(
+                        R0=R0_n, K=0,
+                        Phi=0, optim_s_start=0
+                ))
+                
+                Phi <- list_df_limit[[R0]][[K]][1]
+                optim_s_start <- list_df_limit[[R0]][[K]][2]
+                        
+                df_limit  <- df_limit |> rbind(data.frame(
+                        R0=R0_n, K=K_n,
+                        Phi=Phi, optim_s_start=optim_s_start
+                ))
+        }
+}
+
+
+df_limit <- df_limit |> mutate(
+        R0_v = factor(R0),
+        K_v = factor(K)
+)
+
+levels(df_limit$R0_v) <- sapply(
+        R0_vect,
+        function(r){
+                parse(text=latex2exp::TeX(paste0("$R_0 = ", r, "$")))
+        }
+)
+```
+
+Now, here is the final result: the black “witch-hat” curves represent the maximum achievable reductions in peak prevalence for different intervention effectiveness $\kappa$. These maxima correspond to prolonged interventions.
+
+```{r witch_hat_curves}
+ggplot(df, aes(x=K, y=-Phi, color=delta_m, group=delta_m)) +
+        geom_line() + theme_classic() + scale_color_viridis() +
+        facet_wrap(vars(R0_v), labeller = label_parsed) +
+        labs(
+                x = latex2exp::TeX("$kappa$"),
+                y = latex2exp::TeX("$Phi$"),
+                color = latex2exp::TeX("$delta_m/tau_{(p,0)}$")
+        ) +
+        theme(
+                axis.text = element_text(face="bold", size=10),
+                axis.title = element_text(face="bold", size=15),
+                legend.title = element_text(size=14),
+                legend.text = element_text(face="bold", size=10),
+                strip.text = element_text(face="bold", size=15)
+        ) +
+        geom_line(data=df_limit, color="black")
+
+# Uncomment to save the plot to a PDF file
+# ggsave(here("results","bonus_optim_limit_intervention.pdf"), width=8, height = 6)
+```
+
+We can now ask how to determine the optimal duration of an intervention, given that we see diminishing returns as the intervention lengthens, while also considering other potential costs (economic, social, cultural, political, psychological, somatic).
